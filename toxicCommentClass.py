@@ -28,6 +28,8 @@ from sklearn.feature_extraction.text import TfidfVectorizer
 from sklearn.naive_bayes import MultinomialNB
 from sklearn.model_selection import train_test_split
 from sklearn.metrics import f1_score, confusion_matrix
+from sklearn.linear_model import LogisticRegression
+from sklearn.metrics import log_loss
 
 train = pd.read_csv("data/train.csv")
 sampleSub = pd.read_csv("data/sample_submission.csv")
@@ -97,31 +99,35 @@ rTest = cleanData(rTest)
 rTest = addFeatures(rTest)
 rTestSparse = mapper.transform(rTest)
 
-trainX, testX, trainY, testY = train_test_split(
+sTrainX, sTestX, sTrainY, sTestY = train_test_split(
         trainXSparse, trainY, test_size=0.25, random_state=42)
 
-textClf = MultinomialNB()
+# fit from
+# https://www.kaggle.com/jhoward/nb-svm-strong-linear-baseline-eda-0-052-lb
+
+
+def prob(x, y_i, y):
+    p = x[y == y_i].sum(0)
+    return (p + 1) / ((y == y_i).sum() + 1)
+
+
+def get_mdl(x, y):
+    y = y.values
+    r = np.log(prob(x, 1, y) / prob(x, 0, y))
+    m = LogisticRegression(C=4, dual=True)
+    x_nb = x.multiply(r)
+    return m.fit(x_nb, y), r
+
 score = []
-confusion = 0
 
 for column in classes:
-    textClf.fit(trainX, trainY[column])
-    prediction = pd.DataFrame(textClf.predict(testX))
-    score.append(f1_score(testY[[column]], prediction))
-    confusion += confusion_matrix(testY[[column]], prediction)
-    sampleSub[column] = textClf.predict(rTestSparse)
+    m, r = get_mdl(sTrainX, sTrainY[column])
+    prediction = pd.DataFrame(m.predict_proba(sTestX.multiply(r))[:,1])
+    score.append(log_loss(sTestY[column], prediction))
+    m, r = get_mdl(trainXSparse, trainY[column])
+    sampleSub[column] = pd.DataFrame(m.predict_proba(rTestSparse.multiply(r))[:,1])
 
 print(score)
 print(np.mean(score))
-Confusion = pd.DataFrame(np.reshape(confusion, (1, 4)),
-                                    columns=['TrueNeg', 'FalsePos', 'FalseNeg',
-                                             'TruePos'])
-print(Confusion)
-totalPrecision = float(Confusion['TruePos'] / (Confusion['TruePos']
-                              + Confusion['FalsePos']))
-totalRecall = float(Confusion['TruePos'] / (Confusion['TruePos']
-                              + Confusion['FalseNeg']))
-totalF1 = float(totalPrecision * totalRecall / (totalPrecision + totalRecall))
-print(totalF1)
 
-sampleSub.to_csv("submissions/NB1.csv")
+sampleSub.to_csv("submissions/NB2.csv")
