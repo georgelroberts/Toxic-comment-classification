@@ -125,7 +125,7 @@ for column in classes:
     prediction = pd.DataFrame(m.predict_proba(sTestX.multiply(r))[:,1])
     score.append(log_loss(sTestY[column], prediction))
     m, r = get_mdl(trainXSparse, trainY[column])
-    sampleSub[column] = pd.DataFrame(m.predict_proba(rTestSparse.multiply(r))[:,1])
+    sampleSub[column] = m.predict_proba(rTestSparse.multiply(r))[:,1]
 
 print(score)
 print(np.mean(score))
