@@ -9,15 +9,15 @@ conversations according to different 'toxicity' features.
 This is an example of multi-label classification because each message can
 belong to multiple classes.
 
-TODO: Preliminary EDA on data.
-        * Percentage caps locks
-        * Message length
-        * Count number of exclamation marks/question marks
+TODO: EDA
+        * See the most commonly occuring words for each class.
 
-TODO: Remove IP addresses (and possibly user_ids). Maybe all numbers.
-TODO: See the most commonly occuring words when a message is classified as
-      different things.
-TODO: Add submission of actual test data.
+TODO: Add features.
+        * Number of special characters.
+        * Number of times a full-stop is followed by a lowercase letter?
+
+TODO: Decide what to do with numbers.
+TODO: Remove double spaces
 """
 
 import pandas as pd
@@ -31,6 +31,9 @@ from sklearn.feature_extraction.text import TfidfVectorizer
 from sklearn.model_selection import train_test_split
 from sklearn.linear_model import LogisticRegression
 from sklearn.metrics import log_loss
+from nltk import word_tokenize
+from nltk.stem import WordNetLemmatizer
+plt.rcParams.update({'font.size': 22})
 
 train = pd.read_csv("data/train.csv")
 sampleSub = pd.read_csv("data/sample_submission.csv")
@@ -48,12 +51,12 @@ classes = list(trainY.columns)
 
 def addFeatures(data):
     """ Add extra features beyond the bag of n-grams """
-    data = data.assign(pcCaps = data['msg'].apply(lambda x:
-                               len(re.findall(r'[A-Z]', x))/len(x)))
-    data = data.assign(noExclam = data['msg'].apply(lambda x:
-                                         len(re.findall(r'!', x))))
-    data = data.assign(noQues = data['msg'].apply(lambda x:
-                                len(re.findall(r'\?', x))))
+    data = data.assign(pcCaps=data['msg'].
+                       apply(lambda x: len(re.findall(r'[A-Z]', x))/len(x)))
+    data = data.assign(noExclam=data['msg'].
+                       apply(lambda x: len(re.findall(r'!', x))))
+    data = data.assign(noQues=data['msg'].
+                       apply(lambda x: len(re.findall(r'\?', x))))
     return data
 
 
@@ -65,9 +68,17 @@ def EDA(trainX, trainY, classes):
     """ All exploratory data analysis will be contained within here """
 
     # First look at the classes and their occurrences
+    classCounts = trainY.sum(axis=0)
+    # Add total messages and total clean messages
+    classCounts = classCounts.append(pd.Series(len(trainY),
+                                               index=['Total_messages']))
+    classCounts = classCounts.append(pd.Series(
+            len(trainY[trainY.sum(axis=1) == 0]), index=['Clean_messages']))
+    newClasses = list(classes)
+    newClasses.extend(['Total_messages', 'Clean_messages'])
 
-    classCounts = trainY.sum()
-    sns.barplot(classes, classCounts)
+    fig, ax = plt.subplots(figsize=(25, 20))
+    sns.barplot(newClasses, classCounts)
 
     # Now lets extract some short random comments from each class
 
@@ -82,29 +93,31 @@ def EDA(trainX, trainY, classes):
     # Look at how much the extra features I added above affect the
     # classification.
 
-    a = trainX[['pcCaps', 'noExclam', 'noQues']].join(trainY)
+    a = trainX.drop('msg', axis=1).join(trainY)
     corr = a.corr()
-    plt.matshow(corr, cmap=sns.diverging_palette(220, 10, as_cmap=True))
-    plt.xticks(range(len(corr.columns)), corr.columns)
+    fig, ax = plt.subplots(figsize=(15, 15))
+    plot = ax.matshow(corr, cmap=sns.diverging_palette(220, 10, as_cmap=True))
+    fig.colorbar(plot)
+    plt.xticks(range(len(corr.columns)), corr.columns, rotation=45)
     plt.yticks(range(len(corr.columns)), corr.columns)
     return corr
 
 
-# corr = EDA(trainX, trainY)
+# corr = EDA(trainX, trainY, classes)
 
 
 def cleanData(data):
     """ Remove URLs, special characters and IP addresses """
     data = data.replace(r'http\S+', 'website', regex=True).\
-           replace(r'www.\S+', 'website', regex=True) 
+        replace(r'www.\S+', 'website', regex=True)
 
-    charDict = {'msg': {'!': ' ', '"': ' ', '\n': ' ', '@': ' '}}
+    # charDict = {'msg': {'!': ' ', '"': ' ', '\n': ' ', '@': ' '}}
     # data = data.replace(charDict, regex=True)
-    
+
     data = data.replace(r'\b(?:[0-9]{1,3}\.){3}[0-9]{1,3}\b', 'IP',
                         regex=True)
-    
-    data = data.replace(r'[^a-zA-Z0-9 ]', ' ', regex=True)
+
+    data = data.replace(r'[^a-zA-Z ]', ' ', regex=True)
 
     data['msg'] = data['msg'].astype(str)
     return data
@@ -130,12 +143,20 @@ def get_mdl(x, y):
     return m.fit(x_nb, y), r
 
 
+class LemmaTokenizer(object):
+     def __init__(self):
+         self.wnl = WordNetLemmatizer()
+     def __call__(self, doc):
+         return [self.wnl.lemmatize(t) for t in word_tokenize(doc)]
+
+
 def fitData(classes, trainX, trainY, rTest):
     """ Transform the data into a sparse matrix and fit it """
     mapper = DataFrameMapper([
             (['pcCaps'], None),
             ('msg', TfidfVectorizer(binary=True, ngram_range=(1, 1),
-                                    min_df=0.0005, max_df=0.5))
+                                    tokenizer=LemmaTokenizer(),
+                                    stop_words = 'english'))
     ], sparse=True)
     trainXSparse = mapper.fit_transform(trainX)
     trainXSparseColumns = mapper.features[0][0] +\
@@ -164,4 +185,3 @@ def fitData(classes, trainX, trainY, rTest):
 
 
 score, sampleSub = fitData(classes, trainX, trainY, rTest)
-    
