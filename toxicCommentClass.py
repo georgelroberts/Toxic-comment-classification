@@ -33,6 +33,7 @@ from sklearn.linear_model import LogisticRegression
 from sklearn.metrics import log_loss
 from nltk import word_tokenize
 from nltk.stem import WordNetLemmatizer
+from sklearn.preprocessing import StandardScaler
 plt.rcParams.update({'font.size': 22})
 
 train = pd.read_csv("data/train.csv")
@@ -52,11 +53,42 @@ classes = list(trainY.columns)
 def addFeatures(data):
     """ Add extra features beyond the bag of n-grams """
     data = data.assign(pcCaps=data['msg'].
-                       apply(lambda x: len(re.findall(r'[A-Z]', x))/len(x)))
+                       apply(lambda x: len(re.findall(r'[A-Z]', x)) / len(x)))
     data = data.assign(noExclam=data['msg'].
                        apply(lambda x: len(re.findall(r'!', x))))
     data = data.assign(noQues=data['msg'].
                        apply(lambda x: len(re.findall(r'\?', x))))
+    data = data.assign(msgLength=data['msg'].
+                       apply(lambda x: len(x)))
+    data = data.assign(noWords=data['msg'].
+                       apply(lambda x: len(x.split())))
+    data = data.assign(noUniqueWords=data['msg'].
+                       apply(lambda x: len(set(x.split()))))
+
+    def avgWordLengthFn(x):
+        wordList = [len(word) for word in x.split()]
+        if not wordList:
+            return 0
+        else:
+            return np.mean(wordList)
+    data = data.assign(avgWordLength=data['msg'].apply(avgWordLengthFn))
+
+    def pcWordCapsFn(x):
+        wordList = [word.isupper() for word in x.split()]
+        if not wordList:
+            return 0
+        else:
+            return np.mean(wordList)
+    data = data.assign(pcWordCaps=data['msg'].apply(pcWordCapsFn))
+
+    def pcWordTitleFn(x):
+        wordList = [word.istitle() for word in x.split()]
+        if not wordList:
+            return 0
+        else:
+            return np.mean(wordList)
+    data = data.assign(pcWordTitle=data['msg'].apply(pcWordTitleFn))
+
     return data
 
 
@@ -144,23 +176,22 @@ def get_mdl(x, y):
 
 
 class LemmaTokenizer(object):
-     def __init__(self):
-         self.wnl = WordNetLemmatizer()
-     def __call__(self, doc):
-         return [self.wnl.lemmatize(t) for t in word_tokenize(doc)]
+    def __init__(self):
+        self.wnl = WordNetLemmatizer()
+    def __call__(self, doc):
+        return [self.wnl.lemmatize(t) for t in word_tokenize(doc)]
 
 
 def fitData(classes, trainX, trainY, rTest):
     """ Transform the data into a sparse matrix and fit it """
     mapper = DataFrameMapper([
-            (['pcCaps'], None),
+            (['pcWordCaps', 'pcWordTitle'], None),
             ('msg', TfidfVectorizer(binary=True, ngram_range=(1, 1),
                                     tokenizer=LemmaTokenizer(),
-                                    stop_words = 'english'))
+                                    stop_words='english'))
     ], sparse=True)
     trainXSparse = mapper.fit_transform(trainX)
-    trainXSparseColumns = mapper.features[0][0] +\
-                          mapper.features[1][1].get_feature_names()
+    trainXSparseColumns = mapper.transformed_names_
 
     rTestSparse = mapper.transform(rTest)
 
@@ -181,7 +212,8 @@ def fitData(classes, trainX, trainY, rTest):
 
     sampleSub.to_csv("submissions/NB2.csv")
 
-    return score, sampleSub
+    return score, sampleSub, trainXSparse, trainXSparseColumns
 
 
-score, sampleSub = fitData(classes, trainX, trainY, rTest)
+score, sampleSub, trainXSparse, trainXSparseColumns = fitData(classes, trainX,
+                                                              trainY, rTest)
