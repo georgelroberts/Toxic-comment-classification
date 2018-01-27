@@ -23,7 +23,9 @@ TODO: Save cleaned data so it doesn't need to be loaded every time the fit is
 TODO: Tune hyperparameters: What works well on the leaderboard isn't
         necessarily what words well in the model due to their method of
         separation of test and training data.
+TODO: Truncated SVD before fitting.
 """
+#%% Load packages and data
 
 import pandas as pd
 import re
@@ -55,6 +57,8 @@ trainY = train.drop('comment_text', axis=1)
 rTest = pd.read_csv("data/test.csv")
 rTest = rTest.set_index('id')
 rTest.columns = ['msg']
+
+#%% Clean data and EDA
 
 classes = list(trainY.columns)
 
@@ -101,12 +105,9 @@ def addFeatures(data):
     return data
 
 
-trainX = addFeatures(trainX)
-rTest = addFeatures(rTest)
-
-
 def EDA(trainX, trainY, classes):
     """ All exploratory data analysis will be contained within here """
+    trainX = addFeatures(trainX)
 
     # First look at the classes and their occurrences
     classCounts = trainY.sum(axis=0)
@@ -159,9 +160,6 @@ def EDA(trainX, trainY, classes):
     return corr
 
 
-corr = EDA(trainX, trainY, classes)
-
-
 def cleanData(data):
     """ Remove URLs, special characters and IP addresses """
     data = data.replace(r'http\S+', 'website', regex=True).\
@@ -179,8 +177,21 @@ def cleanData(data):
     return data
 
 
-trainX = cleanData(trainX)
-rTest = cleanData(rTest)
+def cleanAndSave(trainX, rTest):
+    trainX = addFeatures(trainX)
+    rTest = addFeatures(rTest)
+    trainX = cleanData(trainX)
+    rTest = cleanData(rTest)
+
+    trainX.to_csv('data/cleanTrainX.csv')
+    rTest.to_csv('data/cleanrTest.csv')
+
+    return trainX, rTest
+
+# corr = EDA(trainX, trainY, classes)
+# trainX, rTest = cleanAndSave(trainX, rTest)
+
+#%% Fitting
 
 # fit from
 # https://www.kaggle.com/jhoward/nb-svm-strong-linear-baseline-eda-0-052-lb
@@ -206,8 +217,11 @@ class LemmaTokenizer(object):
         return [self.wnl.lemmatize(t) for t in word_tokenize(doc)]
 
 
-def fitData(classes, trainX, trainY, rTest):
+def fitData(classes, trainY):
     """ Transform the data into a sparse matrix and fit it """
+    trainX = pd.read_csv('data/cleanTrainX.csv')
+    rTest = pd.read_csv('data/cleanrTest.csv')
+
     mapper = DataFrameMapper([
             (['pcWordCaps', 'pcWordTitle'], None),
             ('msg', TfidfVectorizer(binary=True, ngram_range=(1, 2),
@@ -243,5 +257,5 @@ def fitData(classes, trainX, trainY, rTest):
     return score, sampleSub, trainXSparse, trainXSparseColumns
 
 
-#score, sampleSub, trainXSparse, trainXSparseColumns = fitData(classes, trainX,
-#                                                              trainY, rTest)
+score, sampleSub, trainXSparse, trainXSparseColumns = fitData(classes, trainX,
+                                                              trainY, rTest)
