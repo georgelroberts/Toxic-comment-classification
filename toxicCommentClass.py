@@ -10,7 +10,7 @@ This is an example of multi-label classification because each message can
 belong to multiple classes.
 
 TODO: EDA
-        * See the most commonly occuring words for each class.
+        * See the most commonly occuring  two word sequences for each class.
 
 TODO: Add features.
         * Number of special characters.
@@ -18,6 +18,11 @@ TODO: Add features.
 
 TODO: Decide what to do with numbers.
 TODO: Remove double spaces
+TODO: Save cleaned data so it doesn't need to be loaded every time the fit is
+        run
+TODO: Tune hyperparameters: What works well on the leaderboard isn't
+        necessarily what words well in the model due to their method of
+        separation of test and training data.
 """
 
 import pandas as pd
@@ -26,6 +31,8 @@ import numpy as np
 import seaborn as sns
 import matplotlib.pyplot as plt
 import random
+import itertools
+import string
 from sklearn_pandas import DataFrameMapper
 from sklearn.feature_extraction.text import TfidfVectorizer
 from sklearn.model_selection import train_test_split
@@ -33,8 +40,10 @@ from sklearn.linear_model import LogisticRegression
 from sklearn.metrics import log_loss
 from nltk import word_tokenize
 from nltk.stem import WordNetLemmatizer
-from sklearn.preprocessing import StandardScaler
+from nltk.corpus import stopwords
+from collections import Counter
 plt.rcParams.update({'font.size': 22})
+stops = set(stopwords.words("english"))
 
 train = pd.read_csv("data/train.csv")
 sampleSub = pd.read_csv("data/sample_submission.csv")
@@ -132,10 +141,25 @@ def EDA(trainX, trainY, classes):
     fig.colorbar(plot)
     plt.xticks(range(len(corr.columns)), corr.columns, rotation=45)
     plt.yticks(range(len(corr.columns)), corr.columns)
+
+    # Find the most common words for each class
+
+    for vulgar in classes:
+        temp = trainX[trainY[vulgar] == 1]
+        temp = cleanData(pd.DataFrame(temp))['msg']
+        temp = temp.apply(lambda x: x.lower())
+        temp = temp.apply(lambda x: word_tokenize(x))
+        allWords = list(itertools.chain.from_iterable(list(temp.values)))
+        filteredWords = [word for word in allWords if word not in stops]
+        commonWords = [word for word, word_count in
+                       Counter(filteredWords).most_common(10)]
+        print("The top 10 most common words in the class " + vulgar + " are: "
+              + (', '.join(commonWords)))
+
     return corr
 
 
-# corr = EDA(trainX, trainY, classes)
+corr = EDA(trainX, trainY, classes)
 
 
 def cleanData(data):
@@ -170,7 +194,7 @@ def prob(x, y_i, y):
 def get_mdl(x, y):
     y = y.values
     r = np.log(prob(x, 1, y) / prob(x, 0, y))
-    m = LogisticRegression(C=4, dual=True)
+    m = LogisticRegression(C=0.1, dual=True)
     x_nb = x.multiply(r)
     return m.fit(x_nb, y), r
 
@@ -186,9 +210,13 @@ def fitData(classes, trainX, trainY, rTest):
     """ Transform the data into a sparse matrix and fit it """
     mapper = DataFrameMapper([
             (['pcWordCaps', 'pcWordTitle'], None),
-            ('msg', TfidfVectorizer(binary=True, ngram_range=(1, 1),
+            ('msg', TfidfVectorizer(binary=True, ngram_range=(1, 2),
                                     tokenizer=LemmaTokenizer(),
-                                    stop_words='english'))
+                                    analyzer='word',
+                                    stop_words='english',
+                                    min_df=3, max_features=None,
+                                    use_idf=1, smooth_idf=1,
+                                    sublinear_tf=1))
     ], sparse=True)
     trainXSparse = mapper.fit_transform(trainX)
     trainXSparseColumns = mapper.transformed_names_
@@ -196,7 +224,7 @@ def fitData(classes, trainX, trainY, rTest):
     rTestSparse = mapper.transform(rTest)
 
     sTrainX, sTestX, sTrainY, sTestY = train_test_split(
-            trainXSparse, trainY, test_size=0.25, random_state=42)
+            trainXSparse, trainY, test_size=0.5)
 
     score = []
 
@@ -215,5 +243,5 @@ def fitData(classes, trainX, trainY, rTest):
     return score, sampleSub, trainXSparse, trainXSparseColumns
 
 
-score, sampleSub, trainXSparse, trainXSparseColumns = fitData(classes, trainX,
-                                                              trainY, rTest)
+#score, sampleSub, trainXSparse, trainXSparseColumns = fitData(classes, trainX,
+#                                                              trainY, rTest)
