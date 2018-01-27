@@ -35,15 +35,20 @@ import matplotlib.pyplot as plt
 import random
 import itertools
 import string
+from scipy import sparse, io
 from sklearn_pandas import DataFrameMapper
 from sklearn.feature_extraction.text import TfidfVectorizer
 from sklearn.model_selection import train_test_split
 from sklearn.linear_model import LogisticRegression
 from sklearn.metrics import log_loss
+from sklearn.base import BaseEstimator, ClassifierMixin
+from sklearn.utils.validation import check_X_y, check_is_fitted
 from nltk import word_tokenize
 from nltk.stem import WordNetLemmatizer
 from nltk.corpus import stopwords
 from collections import Counter
+
+
 plt.rcParams.update({'font.size': 22})
 stops = set(stopwords.words("english"))
 
@@ -196,18 +201,36 @@ def cleanAndSave(trainX, rTest):
 # fit from
 # https://www.kaggle.com/jhoward/nb-svm-strong-linear-baseline-eda-0-052-lb
 
+class NbSvmClassifier(BaseEstimator, ClassifierMixin):
+    def __init__(self, C=1.0, dual=True, n_jobs=1):
+        self.C = C
+        self.dual = dual
+        self.n_jobs = n_jobs
 
-def prob(x, y_i, y):
-    p = x[y == y_i].sum(0)
-    return (p + 1) / ((y == y_i).sum() + 1)
+    def predict(self, x):
+        # Verify that model has been fit
+        check_is_fitted(self, ['_r', '_clf'])
+        return self._clf.predict(x.multiply(self._r))
 
+    def predict_proba(self, x):
+        # Verify that model has been fit
+        check_is_fitted(self, ['_r', '_clf'])
+        return self._clf.predict_proba(x.multiply(self._r))
 
-def get_mdl(x, y):
-    y = y.values
-    r = np.log(prob(x, 1, y) / prob(x, 0, y))
-    m = LogisticRegression(C=0.1, dual=True)
-    x_nb = x.multiply(r)
-    return m.fit(x_nb, y), r
+    def fit(self, x, y):
+        # Check that X and y have correct shape
+        y = y.values
+        x, y = check_X_y(x, y, accept_sparse=True)
+
+        def pr(x, y_i, y):
+            p = x[y==y_i].sum(0)
+            return (p+1) / ((y==y_i).sum()+1)
+
+        self._r = sparse.csr_matrix(np.log(pr(x,1,y) / pr(x,0,y)))
+        x_nb = x.multiply(self._r)
+        self._clf = LogisticRegression(C=self.C, dual=self.dual,
+                                       n_jobs=self.n_jobs).fit(x_nb, y)
+        return self
 
 
 class LemmaTokenizer(object):
@@ -222,20 +245,27 @@ def fitData(classes, trainY):
     trainX = pd.read_csv('data/cleanTrainX.csv')
     rTest = pd.read_csv('data/cleanrTest.csv')
 
-    mapper = DataFrameMapper([
-            (['pcWordCaps', 'pcWordTitle'], None),
-            ('msg', TfidfVectorizer(binary=True, ngram_range=(1, 2),
-                                    tokenizer=LemmaTokenizer(),
-                                    analyzer='word',
-                                    stop_words='english',
-                                    min_df=3, max_features=None,
-                                    use_idf=1, smooth_idf=1,
-                                    sublinear_tf=1))
-    ], sparse=True)
-    trainXSparse = mapper.fit_transform(trainX)
-    trainXSparseColumns = mapper.transformed_names_
+    def runAndSaveMapper(trainX, rTest):
+        mapper = DataFrameMapper([
+                (['pcWordCaps', 'pcWordTitle'], None),
+                ('msg', TfidfVectorizer(binary=True, ngram_range=(1, 2),
+                                        tokenizer=LemmaTokenizer(),
+                                        analyzer='word',
+                                        stop_words='english',
+                                        min_df=3, max_features=None,
+                                        use_idf=1, smooth_idf=1,
+                                        sublinear_tf=1))
+        ], sparse=True)
+        trainXSparse = mapper.fit_transform(trainX)
+        # trainXSparseColumns = mapper.transformed_names_
+        rTestSparse = mapper.transform(rTest)
+        io.mmwrite("trainXSparse.mtx", trainXSparse)
+        io.mmwrite("rTestSparse.mtx", rTestSparse)
 
-    rTestSparse = mapper.transform(rTest)
+
+    # trainXSparseColumns = runAndSaveMapper(trainX, rTest)
+    trainXSparse = sparse.csr_matrix(io.mmread("trainXSparse.mtx"))
+    rTestSparse = sparse.csr_matrix(io.mmread("rTestSparse.mtx"))
 
     sTrainX, sTestX, sTrainY, sTestY = train_test_split(
             trainXSparse, trainY, test_size=0.5)
@@ -243,19 +273,24 @@ def fitData(classes, trainY):
     score = []
 
     for column in classes:
-        m, r = get_mdl(sTrainX, sTrainY[column])
-        prediction = pd.DataFrame(m.predict_proba(sTestX.multiply(r))[:, 1])
+        model = NbSvmClassifier(C=0.1).fit(sTrainX, sTrainY[column])
+        prediction = pd.DataFrame(model.predict_proba(sTestX))
+
+        # m, r = get_mdl(sTrainX, sTrainY[column])
+        # prediction = pd.DataFrame(m.predict_proba(sTestX.multiply(r))[:, 1])
         score.append(log_loss(sTestY[column], prediction))
-        m, r = get_mdl(trainXSparse, trainY[column])
-        sampleSub[column] = m.predict_proba(rTestSparse.multiply(r))[:, 1]
+        model = NbSvmClassifier(C=0.1).fit(trainXSparse, trainY[column])
+        sampleSub[column] = model.predict_proba(rTestSparse)
+
+        # m, r = get_mdl(trainXSparse, trainY[column])
+        # sampleSub[column] = m.predict_proba(rTestSparse.multiply(r))[:, 1]
 
     print(score)
     print(np.mean(score))
 
     sampleSub.to_csv("submissions/NB2.csv")
 
-    return score, sampleSub, trainXSparse, trainXSparseColumns
+    return score, sampleSub, trainXSparse
 
 
-score, sampleSub, trainXSparse, trainXSparseColumns = fitData(classes, trainX,
-                                                              trainY, rTest)
+score, sampleSub, trainXSparse = fitData(classes, trainY)
