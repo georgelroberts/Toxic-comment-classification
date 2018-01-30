@@ -25,7 +25,7 @@ TODO: Tune hyperparameters: What works well on the leaderboard isn't
         separation of test and training data.
 TODO: Truncated SVD before fitting.
 """
-#%% Load packages and data
+# %% Load packages and data
 
 import pandas as pd
 import re
@@ -34,11 +34,10 @@ import seaborn as sns
 import matplotlib.pyplot as plt
 import random
 import itertools
-import string
 from scipy import sparse, io
 from sklearn_pandas import DataFrameMapper
 from sklearn.feature_extraction.text import TfidfVectorizer
-from sklearn.model_selection import train_test_split
+from sklearn.model_selection import train_test_split, GridSearchCV
 from sklearn.linear_model import LogisticRegression
 from sklearn.metrics import log_loss
 from sklearn.base import BaseEstimator, ClassifierMixin
@@ -63,7 +62,7 @@ rTest = pd.read_csv("data/test.csv")
 rTest = rTest.set_index('id')
 rTest.columns = ['msg']
 
-#%% Clean data and EDA
+# %% Clean data and EDA
 
 classes = list(trainY.columns)
 
@@ -193,13 +192,15 @@ def cleanAndSave(trainX, rTest):
 
     return trainX, rTest
 
-# corr = EDA(trainX, trainY, classes)
-# trainX, rTest = cleanAndSave(trainX, rTest)
 
-#%% Fitting
+# corr = EDA(trainX, trainY, classes)
+trainX, rTest = cleanAndSave(trainX, rTest)
+
+# %% Fitting
 
 # fit from
 # https://www.kaggle.com/jhoward/nb-svm-strong-linear-baseline-eda-0-052-lb
+
 
 class NbSvmClassifier(BaseEstimator, ClassifierMixin):
     def __init__(self, C=1.0, dual=True, n_jobs=1):
@@ -223,10 +224,10 @@ class NbSvmClassifier(BaseEstimator, ClassifierMixin):
         x, y = check_X_y(x, y, accept_sparse=True)
 
         def pr(x, y_i, y):
-            p = x[y==y_i].sum(0)
-            return (p+1) / ((y==y_i).sum()+1)
+            p = x[y == y_i].sum(0)
+            return (p + 1) / ((y == y_i).sum() + 1)
 
-        self._r = sparse.csr_matrix(np.log(pr(x,1,y) / pr(x,0,y)))
+        self._r = sparse.csr_matrix(np.log(pr(x, 1, y) / pr(x, 0, y)))
         x_nb = x.multiply(self._r)
         self._clf = LogisticRegression(C=self.C, dual=self.dual,
                                        n_jobs=self.n_jobs).fit(x_nb, y)
@@ -236,6 +237,7 @@ class NbSvmClassifier(BaseEstimator, ClassifierMixin):
 class LemmaTokenizer(object):
     def __init__(self):
         self.wnl = WordNetLemmatizer()
+
     def __call__(self, doc):
         return [self.wnl.lemmatize(t) for t in word_tokenize(doc)]
 
@@ -262,8 +264,7 @@ def fitData(classes, trainY):
         io.mmwrite("trainXSparse.mtx", trainXSparse)
         io.mmwrite("rTestSparse.mtx", rTestSparse)
 
-
-    # trainXSparseColumns = runAndSaveMapper(trainX, rTest)
+    runAndSaveMapper(trainX, rTest)
     trainXSparse = sparse.csr_matrix(io.mmread("trainXSparse.mtx"))
     rTestSparse = sparse.csr_matrix(io.mmread("rTestSparse.mtx"))
 
@@ -271,24 +272,22 @@ def fitData(classes, trainY):
             trainXSparse, trainY, test_size=0.5)
 
     score = []
+    parameters = {'C': np.logspace(-3, 1, 9)}
 
     for column in classes:
-        model = NbSvmClassifier(C=0.1).fit(sTrainX, sTrainY[column])
-        prediction = pd.DataFrame(model.predict_proba(sTestX))
-
-        # m, r = get_mdl(sTrainX, sTrainY[column])
-        # prediction = pd.DataFrame(m.predict_proba(sTestX.multiply(r))[:, 1])
+        gsCV = GridSearchCV(NbSvmClassifier(), parameters)
+        gsCV.fit(sTrainX, sTrainY[column])
+        print(gsCV.best_params_['C'])
+        prediction = pd.DataFrame(gsCV.predict_proba(sTestX)[:, 1])
         score.append(log_loss(sTestY[column], prediction))
-        model = NbSvmClassifier(C=0.1).fit(trainXSparse, trainY[column])
-        sampleSub[column] = model.predict_proba(rTestSparse)
-
-        # m, r = get_mdl(trainXSparse, trainY[column])
-        # sampleSub[column] = m.predict_proba(rTestSparse.multiply(r))[:, 1]
+        model = NbSvmClassifier(C=gsCV.best_params_['C']).fit(trainXSparse,
+                                                              trainY[column])
+        sampleSub[column] = model.predict_proba(rTestSparse)[:, 1]
 
     print(score)
     print(np.mean(score))
 
-    sampleSub.to_csv("submissions/NB2.csv")
+    sampleSub.to_csv("submissions/NB3.csv")
 
     return score, sampleSub, trainXSparse
 
