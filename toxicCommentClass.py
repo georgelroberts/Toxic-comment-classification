@@ -18,9 +18,8 @@ TODO: Add features.
 
 TODO: Decide what to do with numbers.
 TODO: Remove double spaces
-TODO: Examine the possibility of setting a threshold for predicting positive
-        and setting all above this threshold to one: When I was predicting
-        binary outcomes previously, the number of false positives was tiny.
+TODO: Save cleaned data so it doesn't need to be loaded every time the fit is
+        run
 TODO: Tune hyperparameters: What works well on the leaderboard isn't
         necessarily what words well in the model due to their method of
         separation of test and training data.
@@ -39,7 +38,7 @@ import string
 from scipy import sparse, io
 from sklearn_pandas import DataFrameMapper
 from sklearn.feature_extraction.text import TfidfVectorizer
-from sklearn.model_selection import train_test_split, GridSearchCV
+from sklearn.model_selection import train_test_split
 from sklearn.linear_model import LogisticRegression
 from sklearn.metrics import log_loss
 from sklearn.base import BaseEstimator, ClassifierMixin
@@ -195,7 +194,7 @@ def cleanAndSave(trainX, rTest):
     return trainX, rTest
 
 # corr = EDA(trainX, trainY, classes)
-trainX, rTest = cleanAndSave(trainX, rTest)
+# trainX, rTest = cleanAndSave(trainX, rTest)
 
 #%% Fitting
 
@@ -224,10 +223,10 @@ class NbSvmClassifier(BaseEstimator, ClassifierMixin):
         x, y = check_X_y(x, y, accept_sparse=True)
 
         def pr(x, y_i, y):
-            p = x[y == y_i].sum(0)
-            return (p + 1) / ((y == y_i).sum() + 1)
+            p = x[y==y_i].sum(0)
+            return (p+1) / ((y==y_i).sum()+1)
 
-        self._r = sparse.csr_matrix(np.log(pr(x, 1, y) / pr(x, 0, y)))
+        self._r = sparse.csr_matrix(np.log(pr(x,1,y) / pr(x,0,y)))
         x_nb = x.multiply(self._r)
         self._clf = LogisticRegression(C=self.C, dual=self.dual,
                                        n_jobs=self.n_jobs).fit(x_nb, y)
@@ -237,20 +236,18 @@ class NbSvmClassifier(BaseEstimator, ClassifierMixin):
 class LemmaTokenizer(object):
     def __init__(self):
         self.wnl = WordNetLemmatizer()
-
     def __call__(self, doc):
         return [self.wnl.lemmatize(t) for t in word_tokenize(doc)]
 
 
-def fitData(classes, trainY, sampleSub):
+def fitData(classes, trainY):
     """ Transform the data into a sparse matrix and fit it """
     trainX = pd.read_csv('data/cleanTrainX.csv')
     rTest = pd.read_csv('data/cleanrTest.csv')
 
     def runAndSaveMapper(trainX, rTest):
         mapper = DataFrameMapper([
-                (['pcWordCaps', 'pcWordTitle'],
-                 None),
+                (['pcWordCaps', 'pcWordTitle'], None),
                 ('msg', TfidfVectorizer(binary=True, ngram_range=(1, 2),
                                         tokenizer=LemmaTokenizer(),
                                         analyzer='word',
@@ -260,35 +257,40 @@ def fitData(classes, trainY, sampleSub):
                                         sublinear_tf=1))
         ], sparse=True)
         trainXSparse = mapper.fit_transform(trainX)
+        # trainXSparseColumns = mapper.transformed_names_
         rTestSparse = mapper.transform(rTest)
         io.mmwrite("trainXSparse.mtx", trainXSparse)
         io.mmwrite("rTestSparse.mtx", rTestSparse)
 
-    runAndSaveMapper(trainX, rTest)
+
+    # trainXSparseColumns = runAndSaveMapper(trainX, rTest)
     trainXSparse = sparse.csr_matrix(io.mmread("trainXSparse.mtx"))
     rTestSparse = sparse.csr_matrix(io.mmread("rTestSparse.mtx"))
 
     sTrainX, sTestX, sTrainY, sTestY = train_test_split(
-            trainXSparse, trainY, test_size=0.25)
+            trainXSparse, trainY, test_size=0.5)
 
     score = []
-    parameters = {'C': np.logspace(-3, 1, 9)}
 
     for column in classes:
-        gsCV = GridSearchCV(NbSvmClassifier(), parameters)
-        gsCV.fit(sTrainX, sTrainY[column])
-        print(gsCV.best_params_['C'])
-        prediction = pd.DataFrame(gsCV.predict_proba(sTestX))
+        model = NbSvmClassifier(C=0.1).fit(sTrainX, sTrainY[column])
+        prediction = pd.DataFrame(model.predict_proba(sTestX))
+
+        # m, r = get_mdl(sTrainX, sTrainY[column])
+        # prediction = pd.DataFrame(m.predict_proba(sTestX.multiply(r))[:, 1])
         score.append(log_loss(sTestY[column], prediction))
-        model = NbSvmClassifier(C=gsCV.best_params_['C']).fit(trainXSparse,
-                                                              trainY[column])
+        model = NbSvmClassifier(C=0.1).fit(trainXSparse, trainY[column])
         sampleSub[column] = model.predict_proba(rTestSparse)
+
+        # m, r = get_mdl(trainXSparse, trainY[column])
+        # sampleSub[column] = m.predict_proba(rTestSparse.multiply(r))[:, 1]
 
     print(score)
     print(np.mean(score))
-    sampleSub.to_csv("submissions/NB4.csv")
 
-    return score, sampleSub, trainXSparse, gsCV
+    sampleSub.to_csv("submissions/NB2.csv")
+
+    return score, sampleSub, trainXSparse
 
 
-score, sampleSub, trainXSparse, gsCV = fitData(classes, trainY, sampleSub)
+score, sampleSub, trainXSparse = fitData(classes, trainY)
