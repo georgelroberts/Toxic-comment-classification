@@ -1,1 +1,4 @@
 *.mtx
+/Submissions
+/Data/cleanTrainX.csv
+/Data/cleanrTest.csv

@@ -166,6 +166,7 @@ def EDA(trainX, trainY, classes):
 
 def cleanData(data):
     """ Remove URLs, special characters and IP addresses """
+    """ Remove URLs, special characters and IP addresses """
     data = data.replace(r'http\S+', 'website', regex=True).\
         replace(r'www.\S+', 'website', regex=True)
 
@@ -175,9 +176,13 @@ def cleanData(data):
     data = data.replace(r'\b(?:[0-9]{1,3}\.){3}[0-9]{1,3}\b', 'IP',
                         regex=True)
 
+    data = data.replace(r'\n\t', ' ', regex=True)
+    data = data.replace(r'\'', '', regex=True)
     data = data.replace(r'[^a-zA-Z ]', ' ', regex=True)
-
     data['msg'] = data['msg'].astype(str)
+    data['msg'] = data['msg'].str.strip()
+    data['msg'] = data['msg'].str.lower()
+
     return data
 
 
