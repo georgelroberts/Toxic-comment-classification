@@ -14,11 +14,10 @@ import numpy as np
 from gensim.models import Word2Vec
 from nltk import word_tokenize
 from nltk.stem.snowball import SnowballStemmer
-from sklearn.pipeline import Pipeline
 from sklearn.ensemble import ExtraTreesClassifier
 from sklearn.metrics import log_loss
 from sklearn.feature_extraction.text import TfidfVectorizer
-from sklearn.model_selection import train_test_split
+from sklearn.model_selection import train_test_split, GridSearchCV
 from collections import defaultdict
 
 train = pd.read_csv("data/train.csv")
@@ -103,28 +102,32 @@ class TfidfEmbeddingVectorizer(object):
 def fitData(classes, trainX, trainY):
     """ Transform the data into a sparse matrix and fit it """
 
-    etree_w2v_tfidf = Pipeline([
-        ("word2vec vectorizer", TfidfEmbeddingVectorizer(w2v)),
-        ("extra trees", ExtraTreesClassifier(n_estimators=500))])
-
     sTrainX, sTestX, sTrainY, sTestY = train_test_split(
             trainX, trainY, test_size=0.25)
 
+    w2v_tfid = TfidfEmbeddingVectorizer(w2v)
+    w2v_tfid.fit(sTrainX['msg'].tolist(), sTrainY['toxic'].tolist())
+    sTrainXw2v = w2v_tfid.transform(sTrainX['msg'].tolist())
+    sTestXw2v = w2v_tfid.transform(sTestX['msg'].tolist())
+    rTestXw2v = w2v_tfid.transform(rTest['msg'].tolist())
+
+    etree_w2v_tfidf = ExtraTreesClassifier(verbose=1)
+    parameters = {'n_estimators': [10, 100, 500]}
     score = []
 
     for column in classes:
-        etree_w2v_tfidf.fit(sTrainX['msg'].tolist(), sTrainY[column].tolist())
-        prediction = pd.DataFrame(
-                etree_w2v_tfidf.predict_proba(sTestX['msg'].tolist())[:, 1])
+        gsCV = GridSearchCV(etree_w2v_tfidf, parameters)
+        gsCV.fit(sTrainXw2v, sTrainY[column])
+        print(gsCV.best_estimator_)
+        prediction = pd.DataFrame(gsCV.predict_proba(sTestXw2v)[:, 1])
         score.append(log_loss(sTestY[column], prediction))
 
-        sampleSub[column] = etree_w2v_tfidf.predict_proba(
-                rTest.msg.tolist())[:, 1]
+        sampleSub[column] = gsCV.predict_proba(rTestXw2v)[:, 1]
 
     print(score)
     print(np.mean(score))
 
-    sampleSub.to_csv("submissions/Etreew2V.csv")
+    sampleSub.to_csv("submissions/Etreew2V_3.csv")
 
     return score
 
