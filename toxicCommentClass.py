@@ -69,8 +69,7 @@ classes = list(trainY.columns)
 
 def addFeatures(data):
     """ Add extra features beyond the bag of n-grams """
-    data = data.assign(pcCaps=data['msg'].
-                       apply(lambda x: len(re.findall(r'[A-Z]', x)) / len(x)))
+    data = data.assign(pcCaps=len(re.findall(r'[A-Z]', x)) / len(x))
     data = data.assign(noExclam=data['msg'].
                        apply(lambda x: len(re.findall(r'!', x))))
     data = data.assign(noQues=data['msg'].
@@ -84,26 +83,20 @@ def addFeatures(data):
 
     def avgWordLengthFn(x):
         wordList = [len(word) for word in x.split()]
-        if not wordList:
-            return 0
-        else:
-            return np.mean(wordList)
+        return 0 if not wordList else np.mean(wordList)
+
     data = data.assign(avgWordLength=data['msg'].apply(avgWordLengthFn))
 
     def pcWordCapsFn(x):
         wordList = [word.isupper() for word in x.split()]
-        if not wordList:
-            return 0
-        else:
-            return np.mean(wordList)
+        return 0 if not wordList else np.mean(wordList)
+
     data = data.assign(pcWordCaps=data['msg'].apply(pcWordCapsFn))
 
     def pcWordTitleFn(x):
         wordList = [word.istitle() for word in x.split()]
-        if not wordList:
-            return 0
-        else:
-            return np.mean(wordList)
+        return 0 if not wordList else np.mean(wordList)
+
     data = data.assign(pcWordTitle=data['msg'].apply(pcWordTitleFn))
 
     return data
@@ -126,12 +119,12 @@ def EDA(trainX, trainY, classes):
     fig, ax = plt.subplots(figsize=(25, 20))
     sns.barplot(newClasses, classCounts)
 
+    noComments = 2
     # Now lets extract some short random comments from each class
 
     for vulgar in classes:
         temp = trainX[trainY[vulgar] == 1]['msg']
         temp = temp[temp.str.len() < 100]
-        noComments = 2
         randomNos = random.sample(range(1, len(temp)), noComments)
         print("Vulgarity: " + vulgar)
         print(temp.iloc[randomNos].values)
